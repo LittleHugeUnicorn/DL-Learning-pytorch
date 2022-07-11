@@ -1693,6 +1693,71 @@ optimizer=optim.Adam(net.parameters(), lr=0.001)
 
 
 
+### NiN 网络嵌套
+
+#### 模型介绍
+
+LeNet、AlexNet、VGG的设计均是：多层卷积层充分提取空间特征，多层卷积层全部结束后连接多层全连接层（下左图，省略了池化层）。而网络中的网络（NiN）让卷积层与”全连接层“（两层$1 \times 1$卷积层）串联交错（下右图，省略了池化层）
+
+![5.8_nin](E:\Coding\Python\DL-Learning\notes\figs\5.8_nin.svg)
+
+> NiN块是NiN中的基础块。它由一个卷积层加两个充当全连接层的$1\times 1$卷积层串联而成。其中第一个卷积层的超参数可以自行设置，而第二和第三个卷积层的超参数一般是固定的。
+
+NiN去掉了AlexNet最后的3个全连接层，取而代之地，NiN使用了输出通道数等于标签类别数的NiN块，然后使用**全局平均池化层**对每个通道中所有元素求平均并直接用于分类。这个设计的好处是可以显著减小模型参数尺寸，从而缓解过拟合；缺点是有时会造成获得有效模型的训练时间的增加。
+
+#### Pytorch复现模型
+
+==\13_CNN_NiN.ipynb==
+
+仍然使用Fashion-MNIST作为数据集。从如下代码可以看出`nn.Sequential`可以通过函数进行嵌套
+
+```python
+# 展平
+class FlattenLayer(nn.Module):
+    def __init__(self):
+        super(FlattenLayer, self).__init__()
+    def forward(self, x):
+        return x.view(x.shape[0],-1)
+
+# 全局平均池化
+class GlobalAvgPool(nn.Module):
+    def __init__(self):
+        super(GlobalAvgPool, self).__init__()
+    def forward(self, x):
+        return torch.nn.functional.avg_pool2d(x, kernel_size=x.size()[2:])
+
+# NiN块（可以看出Sequential可以嵌套）
+def nin_block(in_ch, out_ch, kernel_size, stride, padding):
+    blk=nn.Sequential(
+        nn.Conv2d(in_ch, out_ch, kernel_size, stride, padding),
+        nn.ReLU(),
+        nn.Conv2d(out_ch, out_ch, 1),
+        nn.ReLU(),
+        nn.Conv2d(out_ch, out_ch, 1),
+        nn.ReLU(),
+    )
+    return blk
+
+net = nn.Sequential(
+    nin_block(1, 96, kernel_size=11, stride=4, padding=0),
+    nn.MaxPool2d(kernel_size=3, stride=2),
+    nin_block(96, 256, kernel_size=5, stride=1, padding=2),
+    nn.MaxPool2d(kernel_size=3, stride=2),
+    nin_block(256, 384, kernel_size=3, stride=1, padding=1),
+    nn.MaxPool2d(kernel_size=3, stride=2), 
+    nn.Dropout(0.5),
+    # 标签类别数是10
+    nin_block(384, 10, kernel_size=3, stride=1, padding=1),
+    GlobalAvgPool(), 
+    # 将四维的输出转成二维的输出，其形状为(批量大小, 10)
+    FlattenLayer()
+    )
+
+net=net.to(device)
+```
+
+
+
 ***
 
 ## 附1-其他函数用法记录
